@@ -6,20 +6,22 @@
 //! Two voices run all the time and the footswitch crossfades between them:
 //!   Peace  the tweed Deluxe at a low volume: clean when picked lightly,
 //!          breaking up when dug into (the quieter tracks)
-//!   Ocean  the same amp flat out: two preamp stages, a woolly, mid-pushed
-//!          tweed tone, 6V6s squashing on a sagging tube rectifier, and
-//!          held notes blooming into feedback ("I'm the Ocean", "Act of Love")
+//!   Downtown  the same amp turned up: two preamp stages, a bright, mid-pushed
+//!          tweed crunch (the "Downtown" sound at the default Drive: chords
+//!          ring clear and bark when dug into; Drive up is the saturated
+//!          "I'm the Ocean" / "Act of Love" wall), 6V6s squashing on a sagging
+//!          tube rectifier, and held notes blooming into feedback
 //! then an open-back 1x12 (Jensen-style) cab sim and a stereo room shared by
 //! both. Holding the footswitch puts a hand on the Bigsby: everything wobbles
 //! in pitch, unevenly, like Neil shaking the bar through a chord.
 //!
 //! Controls
-//!   Left knob   Drive   (Ocean's preamp gain, ~14 to 38 dB)
+//!   Left knob   Drive   (preamp gain, 0 to 38 dB: edge of breakup -> Downtown crunch -> Ocean)
 //!   Mid knob    Room    (room size and level; CCW = dry)
 //!   Right knob  Level   (output; unity at 3 o'clock)
-//!   Footswitch press  Peace <-> Ocean (Peace sits ~5 dB under Ocean)
+//!   Footswitch press  Peace <-> Downtown (Peace sits ~5 dB under Downtown)
 //!   Footswitch hold   Bigsby wobble on/off (both voices)
-//!   LED  Peace: light green | Ocean: dark cobalt | with the Bigsby: light yellow | beige
+//!   LED  Peace: light green | Downtown: dark cobalt | with the Bigsby: light yellow | beige
 //!
 //! Host builds (`cargo sim`) render a demo jam through the same code; see `host`.
 
@@ -39,10 +41,13 @@ use dsp::*;
 
 // ---------------------------------------------------------------- voicing
 
-/// Ocean preamp stage 1 gain (dB) at knob 0, and the extra at knob 1.
-const DRIVE_MIN_DB: f32 = 14.0;
-const DRIVE_RANGE_DB: f32 = 24.0;
-/// Ocean preamp stage 2 gain, dB.
+/// Distorted-voice preamp stage 1 gain (dB) at knob 0, and the extra at knob 1.
+/// Measured on a held dyad (`cargo sim`): ~4% distortion at 0, ~20% (the
+/// Downtown crunch) at the default, ~55% (saturated, Ocean) at 1.
+const DRIVE_MIN_DB: f32 = 0.0;
+const DRIVE_RANGE_DB: f32 = 38.0;
+/// Distorted-voice preamp stage 2 gain, dB.
+const DRIVE_DEFAULT: f32 = 0.4;
 const DRIVE2_DB: f32 = 8.0;
 /// Stage biases: asymmetric clipping (even harmonics, like a tube stage).
 const BIAS1: f32 = 0.25;
@@ -58,12 +63,12 @@ const SAG_ATT_S: f32 = 0.01;
 const SAG_REL_S: f32 = 0.15;
 
 /// Peace: the same amp at a low volume. Preamp gain (dB), and the voice's
-/// level under Ocean plus its makeup gain so it lands there.
+/// level under Downtown plus its makeup gain so it lands there.
 const PEACE_DRIVE_DB: f32 = 10.0;
 const PEACE_LEVEL_DB: f32 = -5.0;
-const PEACE_MAKEUP_DB: f32 = 9.0;
+const PEACE_MAKEUP_DB: f32 = 7.5;
 
-/// Feedback (Ocean only). Real feedback locks onto a harmonic of the string,
+/// Feedback (Downtown only). Real feedback locks onto a harmonic of the string,
 /// because the string is the resonator; a free-running loop in the pedal
 /// would whistle at its own pitch instead. So this is a sustainer: a held
 /// note blooms once nothing has been picked for FB_WAIT seconds while the
@@ -78,7 +83,7 @@ const FB_WAIT: f32 = 0.35;
 const FB_HOLD: f32 = 0.002;
 const FB_MUTE: f32 = 0.0002;
 const FB_MAX_DB: f32 = 30.0;
-const FB_DRY: f32 = 0.3;
+const FB_DRY: f32 = 0.5;
 const FB_HARM: f32 = 1.5;
 const FB_FREQ: f32 = 1100.0;
 const FB_Q: f32 = 4.0;
@@ -113,8 +118,8 @@ const ROOM_RANGE: f32 = 0.2;
 const DAMP: f32 = 0.45;
 const PREDELAY: f32 = 576.0;
 
-/// Output trim: unity Level puts Ocean's chords around -14 dB RMS.
-const OUT_TRIM: f32 = 0.36;
+/// Output trim: unity Level puts Downtown's chords around -14 dB RMS.
+const OUT_TRIM: f32 = 0.42;
 
 // ---------------------------------------------------------------- reverb
 
@@ -249,7 +254,7 @@ struct Mb {
     out_t: f32,
     room_s: f32,
     mix: f32,
-    // Ocean filters
+    // Downtown filters
     pre_hp: Biquad,
     inter_hp: Biquad,
     inter_lp: Biquad,
@@ -299,7 +304,7 @@ impl Mb {
     const NEW: Self = Self {
         ready: false,
         error: false,
-        drive: 0.75,
+        drive: DRIVE_DEFAULT,
         room: 0.45,
         level: 0.75,
         loud: true,
@@ -353,14 +358,15 @@ impl Mb {
 
     fn init(&mut self, b: &mut Bufs) {
         self.hp_in.highpass(70.0, 0.707);
-        // Ocean: loose lows (a tweed doesn't tighten anything up) ...
+        // Downtown: loose lows (a tweed doesn't tighten anything up) ...
         self.pre_hp.highpass(60.0, 0.707);
         self.inter_hp.highpass(40.0, 0.707); // also strips stage 1's DC
-        self.inter_lp.lowpass(5500.0, 0.707);
-        // ... woolly low mids, a mid push and a bright top.
-        self.tone_low.peak(180.0, 0.8, 2.5);
+        self.inter_lp.lowpass(7000.0, 0.707);
+        // ... a little low-mid wool, a mid push and a chiming top (the
+        // Firebird pickup's bite, which keeps open chords clear).
+        self.tone_low.peak(180.0, 0.8, 1.0);
         self.tone_mid.peak(900.0, 0.7, 3.0);
-        self.tone_treb.peak(3000.0, 0.8, 2.0);
+        self.tone_treb.peak(3000.0, 0.8, 3.5);
         self.tone_dc.highpass(30.0, 0.707);
         // Peace: the same amp turned down.
         self.peace_hp.highpass(70.0, 0.707);
@@ -417,9 +423,9 @@ impl Mb {
         line.read(WOB_BASE + depth * 0.5 * (1.0 - cos(TAU * self.wob_ph)))
     }
 
-    /// Ocean voice: two preamp stages -> tweed tone -> sagging power amp (mono).
+    /// Downtown voice: two preamp stages -> tweed tone -> sagging power amp (mono).
     #[inline]
-    fn ocean(&mut self, x: f32) -> f32 {
+    fn downtown(&mut self, x: f32) -> f32 {
         let x = self.pre_hp.process(x);
         // Stage 1 (the volume knob on 10): cheap 2x oversampling.
         let u = x * self.g_pre;
@@ -491,7 +497,7 @@ impl Mb {
         let xs = x + (hold * (FB_DRY * x + FB_HARM * h) - x) * self.fb_ramp;
 
         // Both voices always run, so switching is a click-free crossfade.
-        let o = self.ocean(xs);
+        let o = self.downtown(xs);
         let p = self.peace(x) * db(PEACE_LEVEL_DB + PEACE_MAKEUP_DB);
         let m = self.mix;
         let mut y = p + (o - p) * m;
@@ -619,7 +625,7 @@ unsafe extern "C" fn get_param_max(_: *const PatchEnv, _: i32) -> f32 {
 
 unsafe extern "C" fn get_param_default(_: *const PatchEnv, idx: i32) -> f32 {
     match idx {
-        PARAM_DRIVE => 0.75,
+        PARAM_DRIVE => DRIVE_DEFAULT,
         PARAM_ROOM => 0.45,
         _ => 0.75,
     }

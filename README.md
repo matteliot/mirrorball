@@ -9,15 +9,16 @@ Two voices run all the time and the footswitch crossfades between them:
 
 - **Peace** (regular): the tweed Deluxe at a low volume. It's clean when you pick lightly and breaks up when you dig
   in, like the quieter tracks.
-- **Ocean** (distorted): the same amp flat out. Two preamp stages with loose lows, a woolly, mid-pushed tweed tone, and
-  6V6s squashing on a sagging tube rectifier: a hard hit squashes the attack and the chord swells back as the supply
-  recovers. This is *I'm the Ocean* and *Act of Love*.
+- **Downtown** (distorted): the same amp turned up. At the default Drive it's the *Downtown* sound: a bright, mid-pushed tweed
+  crunch where open chords ring clear and bark when you dig in. Two preamp stages with loose lows feed 6V6s squashing on
+  a sagging tube rectifier: a hard hit squashes the attack and the chord swells back as the supply recovers. Turn Drive
+  all the way up for the saturated *I'm the Ocean* / *Act of Love* wall.
 
 Both go through an open-back 1x12 (Jensen-style) cab sim and a stereo live room (12 ms pre-delay). The room is shared,
 so its tail carries across a switch. There's no noise gate: this tone is supposed to be ragged. Input comes from the
 left jack.
 
-**Feedback**: in Ocean, a note or chord left ringing (nothing picked for about a third of a second) blooms into
+**Feedback**: in Downtown, a note or chord left ringing (nothing picked for about a third of a second) blooms into
 feedback over about a second. Like the real thing, it locks onto a harmonic of what you're holding: the note is held up
 as the string decays, and the partials in a slowly drifting band (about 830 Hz to 1.5 kHz) are pushed up, so the
 feedback wanders between harmonics. Picking again or muting the strings stops it.
@@ -27,16 +28,16 @@ like Neil shaking the bar through a chord. It's on the guitar, so it works in bo
 
 | Control | Function |
 |---|---|
-| Left knob | **Drive**: Ocean's preamp gain, about 14 to 38 dB |
+| Left knob | **Drive**: preamp gain, 0 to 38 dB. About 3% distortion at 0 (edge of breakup), 22% at the default 0.4 (Downtown), 60% at max (Ocean) |
 | Mid knob | **Room**: room size and level. CCW is dry |
 | Right knob | **Level**: output, unity at 3 o'clock |
-| Footswitch press | **Peace ↔ Ocean**. Peace sits about 5 dB under Ocean |
+| Footswitch press | **Peace ↔ Downtown**. Peace sits about 5 dB under Downtown |
 | Footswitch hold | **Bigsby** wobble on/off (both voices) |
 
 | LED | Bigsby off | Bigsby on |
 |---|---|---|
 | Peace | light green | light yellow |
-| Ocean | dark cobalt | beige |
+| Downtown | dark cobalt | beige |
 
 Red means the firmware didn't provide the working buffer.
 
@@ -60,9 +61,11 @@ This renders an original, ragged D–C–G–D jam at 104 bpm, with loose timing
 (`src/guitar.rs`):
 
 1. Peace: a strum a beat.
-2. Ocean: all-downstroke eighths, hit hard.
+2. Downtown: bouncy, slightly swung down-up eighths at the default crunch.
 3. A few-note lead ending on a held D that blooms into feedback.
 4. The Bigsby: chords shaken, then a held G and D.
-5. A last D left to howl, then muted into the room.
+5. Drive turned all the way up: the Ocean wall, all-downstroke eighths hit hard.
+6. A last D left to howl, then muted into the room.
 
-Then it prints the level and stereo width of each section, and how the held note's feedback bloomed.
+Then it prints the level and stereo width of each section, how the held note's feedback bloomed, and a Drive sweep
+(level and distortion of a held dyad at six knob positions).

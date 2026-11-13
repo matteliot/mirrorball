@@ -5,11 +5,12 @@
 //! timing; the timing here is loose on purpose), drives the patch's entry
 //! points the way the firmware does (128-sample blocks, footswitch events at
 //! set times) and writes a stereo float WAV: Peace (the tweed turned down,
-//! strummed) -> Ocean (flat out, all-downstroke eighths) -> a sparse lead
-//! ending on a held note that blooms into feedback -> the Bigsby (chords
-//! shaken, then held) -> a last chord left to howl, then muted.
-//! Prints per-section level stats and the feedback bloom, and fails on NaN
-//! or clipping.
+//! strummed) -> Downtown (the default crunch, bouncy down-up eighths) -> a
+//! sparse lead ending on a held note that blooms into feedback -> the Bigsby
+//! (chords shaken, then held) -> Drive turned all the way up (the saturated
+//! Ocean wall, all-downstroke eighths) -> a last chord left to howl, then
+//! muted. Prints per-section level stats, the feedback bloom and a Drive
+//! sweep, and fails on NaN or clipping.
 
 use crate::guitar::{Note, Player};
 use crate::*;
@@ -29,6 +30,8 @@ enum Ev {
     Play(Vec<Note>, f32, bool),
     Press,
     Hold,
+    /// Turn the Drive knob to this.
+    Drive(f32),
 }
 
 fn chord(c: &[f32], vel: f32) -> Vec<Note> {
@@ -73,22 +76,30 @@ fn score() -> (Vec<(f64, Ev, &'static str)>, f64, Marks) {
         }
     }
 
-    // Ocean: all-downstroke eighths, hit hard, the last one of each bar left
-    // to ring into the next chord.
-    ev.push((t, Ev::Press, "ocean (chords)"));
+    // Downtown: bouncy down-up eighths with a little swing (upstrokes late,
+    // lighter, top strings only), the "and" of 4 left to ring into the next
+    // chord.
+    let swing = 0.12 * e;
+    let up = |c: &[f32], vel: f32| c[c.len().saturating_sub(3)..].iter().map(|f| Note::new(*f).vel(vel)).collect::<Vec<_>>();
+    ev.push((t, Ev::Press, "downtown (chords)"));
     for _ in 0..2 {
         for c in prog {
-            for k in 0..7 {
-                let vel = if k == 0 { 1.0 } else { 0.85 };
-                ev.push((t + slop(), Ev::Play(chord(c, vel), 0.010, false), ""));
-                t += if k == 6 { 2.0 * e } else { e };
+            for k in 0..8 {
+                let x = if k % 2 == 0 {
+                    Ev::Play(chord(c, if k == 0 { 0.95 } else { 0.8 }), 0.010, false)
+                } else {
+                    Ev::Play(up(c, 0.6), 0.006, true)
+                };
+                let at = t + if k % 2 == 1 { swing } else { 0.0 };
+                ev.push((at + slop(), x, ""));
+                t += e;
             }
         }
     }
 
     // A few-note lead, worried rather than shredded, ending on a held D that
     // the amp takes over.
-    ev.push((t, Ev::Play(vec![], 0.0, true), "ocean (lead)"));
+    ev.push((t, Ev::Play(vec![], 0.0, true), "downtown (lead)"));
     let lead: [(f32, f64, Option<f32>); 7] = [
         (440.0, 2.0, Some(200.0)), // A, bent up a tone
         (369.99, 2.0, None),
@@ -108,11 +119,11 @@ fn score() -> (Vec<(f64, Ev, &'static str)>, f64, Marks) {
     }
     let bloom = t;
     let bloom_len = 8.0 * q;
-    ev.push((t, Ev::Play(vec![Note::new(587.33).vel(1.0).t60(30.0).vib()], 0.0, false), "ocean, held note (feedback)"));
+    ev.push((t, Ev::Play(vec![Note::new(587.33).vel(1.0).t60(30.0).vib()], 0.0, false), "downtown, held note (feedback)"));
     t += bloom_len;
 
     // The Bigsby: a round of chords shaken, then a held G and D.
-    ev.push((t, Ev::Hold, "ocean + bigsby"));
+    ev.push((t, Ev::Hold, "downtown + bigsby"));
     for c in prog {
         for k in 0..4 {
             ev.push((t + slop(), Ev::Play(chord(c, if k == 0 { 1.0 } else { 0.85 }), 0.010, false), ""));
@@ -124,9 +135,20 @@ fn score() -> (Vec<(f64, Ev, &'static str)>, f64, Marks) {
     ev.push((t + slop(), Ev::Play(held(&D, 1.0), 0.012, false), ""));
     t += 4.0 * q;
 
-    // Bigsby off: a last D left to howl, then muted into the room.
-    ev.push((t, Ev::Hold, "last chord, howl"));
-    ev.push((t + 0.01, Ev::Play(held(&D, 1.0), 0.014, false), ""));
+    // Bigsby off, Drive all the way up: the saturated Ocean wall, all-
+    // downstroke eighths hit hard, the last of each bar left to ring.
+    ev.push((t, Ev::Hold, "drive up: ocean (chords)"));
+    ev.push((t, Ev::Drive(1.0), ""));
+    for c in prog {
+        for k in 0..7 {
+            let vel = if k == 0 { 1.0 } else { 0.85 };
+            ev.push((t + slop(), Ev::Play(chord(c, vel), 0.010, false), ""));
+            t += if k == 6 { 2.0 * e } else { e };
+        }
+    }
+
+    // A last D left to howl, then muted into the room.
+    ev.push((t + 0.01, Ev::Play(held(&D, 1.0), 0.014, false), "last chord, howl"));
     t += 8.0 * q;
     ev.push((t, Ev::Play(vec![Note::new(146.83).vel(0.01).t60(0.02)], 0.0, false), "muted: room tail"));
     (ev, t + 3.0, Marks { bloom, bloom_len })
@@ -160,6 +182,7 @@ pub fn main() {
             match e {
                 Ev::Press => unsafe { special_action(&env, ACTION_FOOTSWITCH_PRESS) },
                 Ev::Hold => unsafe { special_action(&env, ACTION_FOOTSWITCH_HOLD) },
+                Ev::Drive(v) => unsafe { set_param(&env, PARAM_DRIVE, v) },
                 Ev::Play(notes, strum, ring) => guitar.play(&notes, strum, ring),
             }
             if !label.is_empty() {
@@ -221,6 +244,7 @@ pub fn main() {
     }
     write_wav(&out, &lo, &ro);
     println!("wrote {out} ({:.1} s)", lo.len() as f64 / SRU as f64);
+    drive_sweep(&env);
     if bad {
         eprintln!("error: NaN or full-scale output");
         std::process::exit(1);
@@ -248,4 +272,51 @@ fn write_wav(path: &str, l: &[f32], r: &[f32]) {
         b.extend_from_slice(&c.to_le_bytes());
     }
     std::fs::write(path, b).unwrap();
+}
+
+/// How hard the distorted voice breaks up across the Drive knob: a held D3+A3 dyad (sine tones at a strummed
+/// chord's level), level and distortion (everything that isn't the two tones). The feedback sustainer is held off
+/// so this measures the amp alone.
+fn drive_sweep(env: &PatchEnv) {
+    let s = state();
+    s.loud = true;
+    s.bigsby = false;
+    unsafe { set_param(env, PARAM_ROOM, 0.0) };
+    let tones = [147.0, 220.0]; // D3 and A3, rounded so both fit the 1 s window exactly (no leakage)
+    let to_db = |v: f64| 20.0 * v.max(1e-9).log10();
+    println!("\nDrive sweep, held D3+A3 dyad through the distorted voice:\n{:>6} {:>8} {:>12}", "Drive", "rms dB", "distortion %");
+    for drive in [1.0, 0.75, 0.5, 0.35, 0.2, 0.0] {
+        unsafe { set_param(env, PARAM_DRIVE, drive) };
+        let mut out = vec![];
+        let mut n = 0usize;
+        while out.len() < SRU * 3 / 2 {
+            let mut l = [0.0f32; N];
+            let mut r = [0.0f32; N];
+            for x in l.iter_mut() {
+                let t = n as f32 / SRU as f32;
+                *x = tones.iter().map(|f| 0.08 * (core::f32::consts::TAU * f * t).sin()).sum();
+                n += 1;
+            }
+            state().since_onset = 0; // keep the sustainer from latching on the steady tones
+            unsafe { update_buffers(env, l.as_mut_ptr(), r.as_mut_ptr(), N as i32) };
+            out.extend_from_slice(&l);
+        }
+        // Skip the first half second (knob smoothing, filters settling), then measure one second.
+        let w = &out[SRU / 2..SRU / 2 + SRU];
+        let total: f64 = w.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / w.len() as f64;
+        let tone_power: f64 = tones
+            .iter()
+            .map(|f| {
+                let (mut c, mut si) = (0.0f64, 0.0f64);
+                for (i, v) in w.iter().enumerate() {
+                    let ph = std::f64::consts::TAU * *f as f64 * (SRU / 2 + i) as f64 / SRU as f64;
+                    c += *v as f64 * ph.cos();
+                    si += *v as f64 * ph.sin();
+                }
+                let (a, b) = (2.0 * c / w.len() as f64, 2.0 * si / w.len() as f64);
+                (a * a + b * b) / 2.0
+            })
+            .sum();
+        println!("{drive:>6.2} {:>8.1} {:>12.1}", to_db(total.sqrt()), 100.0 * ((total - tone_power).max(0.0) / tone_power).sqrt());
+    }
 }
