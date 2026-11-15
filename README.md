@@ -63,7 +63,7 @@ cargo sim                    # -> target/render/mirrorball_demo.wav
 ```
 
 This renders an original, ragged D–C–G–D jam at 104 bpm, with loose timing, on a modelled electric guitar
-(`src/guitar.rs`):
+(`src/pedalkit/guitar.rs`):
 
 1. Peace: a strum a beat.
 2. Downtown: bouncy, slightly swung down-up eighths at the default crunch.
@@ -74,3 +74,9 @@ This renders an original, ragged D–C–G–D jam at 104 bpm, with loose timing
 
 Then it prints the level and stereo width of each section, how the held note's feedback bloomed, and a Drive sweep
 (level and distortion of a held dyad at six knob positions).
+
+## Code layout
+
+- `src/mirrorball/`: the pedal. `patch.rs` wires it up, `presets.rs` holds every number, and the other files are its blocks.
+- `src/pedalkit/`: shared building blocks (effects, DSP, the Endless ABI, the entry points, the demo renderer). It's a copy of the master in [superPedal](https://github.com/matteliot/superPedal), which also carries this pedal, so don't edit it here.
+- `src/host/`: the `cargo sim` demo (`score.rs` is what it plays).
